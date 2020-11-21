@@ -32,12 +32,13 @@ else:
 class Message(db.Model):
     """The Message model."""
     __tablename__ = 'messages'
-    id = db.Column(db.Integer, primary_key=True)
+    id         = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.Integer, default=timestamp)
     updated_at = db.Column(db.Integer, default=timestamp, onupdate=timestamp)
-    source = db.Column(db.Text, nullable=False)
-    html = db.Column(db.Text, nullable=False)
-    user_id = db.Column(db.Integer, nullable=False)
+    source     = db.Column(db.Text, nullable=False)
+    html       = db.Column(db.Text, nullable=False)
+    user_id    = db.Column(db.Integer, nullable=False)
+    roomid     = db.Column(db.Integer, nullable=False, default=0)
 
     def from_dict(self, data, partial_update=True):
         """Import message data from a dictionary."""
@@ -51,12 +52,13 @@ class Message(db.Model):
     def to_dict(self):
         """Export message to a dictionary."""
         return {
-            'id': self.id,
+            'id':         self.id,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
-            'source': self.source,
-            'html': self.html,
-            'user_id': self.user_id,
+            'source':     self.source,
+            'html':       self.html,
+            'user_id':    self.user_id,
+            'roomid':     self.roomid,
             '_links': {
                 'self': url_for('get_message', id=self.id),
                 'user': '/users/{}'.format(self.user_id)
@@ -66,7 +68,15 @@ class Message(db.Model):
     def render_markdown(self):
         """Render markdown source to HTML with a tag whitelist."""
         allowed_tags = ['a', 'abbr', 'acronym', 'b', 'code', 'em', 'i',
-                        'strong']
+                        'strong', 'h1']
+        # more options:
+        # 'a', 'abbr', 'acronym', 'b',
+        # 'blockquote', 'code', 'em',
+        # 'i', 'li', 'ol', 'pre', 'strong',
+        # 'ul', 'h1', 'h2', 'h3', 'p', 'br', 'ins', 'del',
+        # use it like this:
+        # <code> Your code here </code>
+        # or `code here`
         self.html = bleach.linkify(bleach.clean(
             markdown(self.source, output_format='html'),
             tags=allowed_tags, strip=True))
@@ -106,6 +116,9 @@ class Message(db.Model):
 @db.event.listens_for(Message, 'after_update')
 def after_user_update(mapper, connection, target):
     if socketio:
+        print("after update inside db listens for")
+        print(mapper, connection, target)
+        print(target.to_dict())
         socketio.emit('updated_model', {'class': target.__class__.__name__,
                                         'model': target.to_dict()})
 
@@ -126,9 +139,11 @@ def render_message(id):
 def new_message():
     """
     Post a new message.
-    This endpoint is requires a valid user token.
+    This endpoint requires a valid user token.
     """
     msg = Message(user_id=g.jwt_claims['user_id'])
+    print("inside new message")
+    print(request.get_json())
     msg.from_dict(request.get_json(), partial_update=False)
     msg.html = '...'
     db.session.add(msg)

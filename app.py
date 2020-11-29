@@ -13,6 +13,7 @@ import threading
 import config
 from microflack_common.auth import token_auth, token_optional_auth
 from microflack_common.utils import timestamp, url_for
+import logging
 
 app = Flask(__name__)
 config_name = os.environ.get('FLASK_CONFIG', 'dev')
@@ -39,10 +40,12 @@ class Message(db.Model):
     html       = db.Column(db.Text, nullable=False)
     user_id    = db.Column(db.Integer, nullable=False)
     roomid     = db.Column(db.Integer, nullable=False, default=0)
+    # the message is always send to the roomid, if you want to send an individual
+    # message just use room=sid
 
     def from_dict(self, data, partial_update=True):
         """Import message data from a dictionary."""
-        for field in ['source']:
+        for field in ['source', 'roomid']: #, 'roomid'
             try:
                 setattr(self, field, data[field])
             except KeyError:
@@ -115,13 +118,15 @@ class Message(db.Model):
 
 @db.event.listens_for(Message, 'after_update')
 def after_user_update(mapper, connection, target):
+    # see https://flask-socketio.readthedocs.io/en/latest/
+    #target.to_dict()={'id': 81, 'created_at': 1606130280, 'updated_at': 1606130280, 'source': 'asdfasdf', 'html': 'asdfasdf', 'user_id': 47, 'roomid': 0, '_links': {'self': '/api/messages/81', 'user': '/users/47'}}
     if socketio:
-        print("after update inside db listens for")
-        print(mapper, connection, target)
-        print(target.to_dict())
+        try:
+            room = target.to_dict()['roomid']
+        except:
+            room = 0
         socketio.emit('updated_model', {'class': target.__class__.__name__,
-                                        'model': target.to_dict()})
-
+                                        'model': target.to_dict()}, room=room)
 
 def render_message(id):
     with app.app_context():
@@ -142,8 +147,6 @@ def new_message():
     This endpoint requires a valid user token.
     """
     msg = Message(user_id=g.jwt_claims['user_id'])
-    print("inside new message")
-    print(request.get_json())
     msg.from_dict(request.get_json(), partial_update=False)
     msg.html = '...'
     db.session.add(msg)
@@ -162,7 +165,6 @@ def new_message():
                                          args=(msg.id,))
         render_thread.start()
     return r
-
 
 @app.route('/api/messages', methods=['GET'])
 @token_optional_auth.login_required
